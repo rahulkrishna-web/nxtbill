@@ -9,7 +9,7 @@ import { Login } from "./components/Login";
 import { ShieldAlert } from "lucide-react";
 
 // Firebase imports
-import { collection, doc, onSnapshot, setDoc, deleteDoc, writeBatch } from "firebase/firestore";
+import { collection, doc, onSnapshot, setDoc, deleteDoc, writeBatch, getDoc, query, where, or } from "firebase/firestore";
 import { auth, db } from "./lib/firebase";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
 
@@ -43,6 +43,9 @@ export default function Home() {
   const [activeInvoiceId, setActiveInvoiceId] = useState<string>("");
   const [clientPresets, setClientPresets] = useState<ClientPreset[]>([]);
   const [dbError, setDbError] = useState<string | null>(null);
+  const [userOrgId, setUserOrgId] = useState<string>("");
+  const [userOrgName, setUserOrgName] = useState<string>("");
+  const [isCheckingOrg, setIsCheckingOrg] = useState<boolean>(true);
 
   // 1. Mount & Auth subscription
   useEffect(() => {
@@ -50,11 +53,58 @@ export default function Home() {
     
     if (!auth) {
       setAuthLoading(false);
+      setIsCheckingOrg(false);
       return;
     }
     
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
+      if (user && db) {
+        setIsCheckingOrg(true);
+        try {
+          // Fetch or create user record
+          const userDocRef = doc(db, "users", user.uid);
+          const userDocSnap = await getDoc(userDocRef);
+          
+          let orgId = "";
+          if (userDocSnap.exists()) {
+            const data = userDocSnap.data();
+            orgId = data.organizationId || "";
+          } else {
+            // Set default empty user doc
+            await setDoc(userDocRef, {
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName || user.email?.split("@")[0] || "User",
+              photoURL: user.photoURL || "",
+              organizationId: "",
+              createdAt: new Date().toISOString()
+            });
+          }
+
+          if (orgId) {
+            setUserOrgId(orgId);
+            // Fetch organization details
+            const orgDocSnap = await getDoc(doc(db, "organizations", orgId));
+            if (orgDocSnap.exists()) {
+              setUserOrgName(orgDocSnap.data().name || "Workspace");
+            } else {
+              setUserOrgName("Workspace");
+            }
+          } else {
+            setUserOrgId("");
+            setUserOrgName("");
+          }
+        } catch (err) {
+          console.error("Error setting up user profile or org:", err);
+        } finally {
+          setIsCheckingOrg(false);
+        }
+      } else {
+        setUserOrgId("");
+        setUserOrgName("");
+        setIsCheckingOrg(false);
+      }
       setAuthLoading(false);
     });
 
@@ -63,7 +113,7 @@ export default function Home() {
 
   // 2. Firestore real-time sync subscription
   useEffect(() => {
-    if (!currentUser || !db) {
+    if (!currentUser || !db || !userOrgId) {
       setInvoices([]);
       setClientPresets([]);
       return;
@@ -71,7 +121,15 @@ export default function Home() {
 
     // Subscribe to invoices collection
     const invoicesRef = collection(db!, "invoices");
-    const unsubscribeInvoices = onSnapshot(invoicesRef, (snapshot) => {
+    const qInvoices = query(
+      invoicesRef,
+      or(
+        where("organizationId", "==", userOrgId),
+        where("sharedWith", "array-contains", currentUser.email || "")
+      )
+    );
+    
+    const unsubscribeInvoices = onSnapshot(qInvoices, (snapshot) => {
       setDbError(null);
       let loadedInvoices: Invoice[] = [];
       snapshot.forEach((doc) => {
@@ -86,8 +144,13 @@ export default function Home() {
       });
 
       if (loadedInvoices.length === 0) {
-        // Seed with INITIAL_INVOICE
-        setDoc(doc(db!, "invoices", INITIAL_INVOICE.id), INITIAL_INVOICE);
+        // Seed with INITIAL_INVOICE containing organizationId
+        const seededInvoice = {
+          ...INITIAL_INVOICE,
+          organizationId: userOrgId,
+          sharedWith: []
+        };
+        setDoc(doc(db!, "invoices", seededInvoice.id), seededInvoice);
       } else {
         setInvoices(loadedInvoices);
         // Ensure there is an activeInvoiceId
@@ -105,7 +168,9 @@ export default function Home() {
 
     // Subscribe to client presets collection
     const clientsRef = collection(db!, "clientPresets");
-    const unsubscribeClients = onSnapshot(clientsRef, (snapshot) => {
+    const qClients = query(clientsRef, where("organizationId", "==", userOrgId));
+    
+    const unsubscribeClients = onSnapshot(qClients, (snapshot) => {
       setDbError(null);
       let loadedClients: ClientPreset[] = [];
       snapshot.forEach((doc) => {
@@ -113,9 +178,12 @@ export default function Home() {
       });
 
       if (loadedClients.length === 0) {
-        // Seed DEFAULT_CLIENTS
+        // Seed DEFAULT_CLIENTS with organizationId
         DEFAULT_CLIENTS.forEach(client => {
-          setDoc(doc(db!, "clientPresets", client.id), client);
+          setDoc(doc(db!, "clientPresets", client.id), {
+            ...client,
+            organizationId: userOrgId
+          });
         });
       } else {
         setClientPresets(loadedClients);
@@ -197,6 +265,8 @@ export default function Home() {
       footerNote: "Thank you.",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      organizationId: userOrgId,
+      sharedWith: [],
     };
 
     try {
@@ -250,6 +320,8 @@ export default function Home() {
         id: activeInvoiceId, 
         invoiceNumber: activeInvoice.invoiceNumber, // preserve number
         date: activeInvoice.date, // preserve date
+        organizationId: activeInvoice.organizationId, // preserve org
+        sharedWith: activeInvoice.sharedWith || [], // preserve sharing
         updatedAt: new Date().toISOString() 
       };
       try {
@@ -267,6 +339,7 @@ export default function Home() {
     const preset: ClientPreset = {
       ...newPreset,
       id: presetId,
+      organizationId: userOrgId,
     };
     try {
       await setDoc(doc(db!, "clientPresets", presetId), preset);
@@ -321,7 +394,9 @@ export default function Home() {
         data.invoices.forEach((inv: Invoice) => {
           const normalized = {
             ...inv,
-            date: inv.date ? normalizeDateStr(inv.date) : inv.date
+            date: inv.date ? normalizeDateStr(inv.date) : inv.date,
+            organizationId: userOrgId,
+            sharedWith: inv.sharedWith || []
           };
           const ref = doc(db!, "invoices", normalized.id);
           batch.set(ref, normalized);
@@ -330,7 +405,10 @@ export default function Home() {
         if (Array.isArray(data.clientPresets)) {
           data.clientPresets.forEach((client: ClientPreset) => {
             const ref = doc(db!, "clientPresets", client.id);
-            batch.set(ref, client);
+            batch.set(ref, {
+              ...client,
+              organizationId: userOrgId
+            });
           });
         }
         
@@ -367,6 +445,149 @@ export default function Home() {
     return <Login />;
   }
 
+  // Render loading state during workspace verification
+  if (isCheckingOrg) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-zinc-950 text-white font-sans">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-4 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+          <div className="text-sm font-semibold tracking-wide text-zinc-400">Verifying Workspace...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Render workspace setup portal if organizationId is not set
+  if (!userOrgId) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-zinc-950 text-white font-sans p-6">
+        <div className="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl space-y-6">
+          <div className="space-y-2 text-center">
+            <h2 className="text-2xl font-bold tracking-tight text-white">Setup Your Workspace</h2>
+            <p className="text-sm text-zinc-400 font-medium">Create a new billing organization or join an existing one to get started.</p>
+          </div>
+
+          <div className="space-y-4">
+            {/* Create Org Form */}
+            <div className="p-4 bg-zinc-950/40 rounded-xl border border-zinc-850 space-y-3">
+              <h3 className="text-xs font-bold text-teal-400 uppercase tracking-wider font-mono">Option A: Create New Workspace</h3>
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  placeholder="Organization / Company Name (e.g. NXTNET)"
+                  id="newOrgName"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-teal-500"
+                />
+                <button
+                  onClick={async () => {
+                    const nameInput = document.getElementById("newOrgName") as HTMLInputElement;
+                    const name = nameInput?.value?.trim();
+                    if (!name) {
+                      alert("Please enter a workspace name.");
+                      return;
+                    }
+                    if (!db || !currentUser) return;
+                    setIsCheckingOrg(true);
+                    try {
+                      const newOrgId = `org-${Math.random().toString(36).substring(2, 9)}`;
+                      
+                      // 1. Create organization document
+                      await setDoc(doc(db, "organizations", newOrgId), {
+                        id: newOrgId,
+                        name: name,
+                        ownerId: currentUser.uid,
+                        createdAt: new Date().toISOString()
+                      });
+
+                      // 2. Update user document
+                      await setDoc(doc(db, "users", currentUser.uid), {
+                        organizationId: newOrgId
+                      }, { merge: true });
+
+                      setUserOrgId(newOrgId);
+                      setUserOrgName(name);
+                    } catch (e: any) {
+                      console.error("Failed to create workspace:", e);
+                      alert("Error: " + e.message);
+                    } finally {
+                      setIsCheckingOrg(false);
+                    }
+                  }}
+                  className="w-full py-2 bg-teal-500 hover:bg-teal-400 text-black font-semibold rounded-xl text-xs transition-all cursor-pointer"
+                >
+                  Create Workspace
+                </button>
+              </div>
+            </div>
+
+            {/* Join Org Form */}
+            <div className="p-4 bg-zinc-950/40 rounded-xl border border-zinc-850 space-y-3">
+              <h3 className="text-xs font-bold text-amber-405 text-amber-400 uppercase tracking-wider font-mono">Option B: Join Existing Workspace</h3>
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  placeholder="Enter Workspace Code (provided by colleague)"
+                  id="joinOrgId"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-teal-500"
+                />
+                <button
+                  onClick={async () => {
+                    const idInput = document.getElementById("joinOrgId") as HTMLInputElement;
+                    const enteredId = idInput?.value?.trim();
+                    if (!enteredId) {
+                      alert("Please enter a workspace code.");
+                      return;
+                    }
+                    if (!db || !currentUser) return;
+                    setIsCheckingOrg(true);
+                    try {
+                      // Verify organization exists
+                      const orgRef = doc(db, "organizations", enteredId);
+                      const orgSnap = await getDoc(orgRef);
+                      
+                      if (!orgSnap.exists()) {
+                        alert("Workspace code not found. Please verify with your workspace administrator.");
+                        return;
+                      }
+
+                      const orgData = orgSnap.data();
+
+                      // Update user document
+                      await setDoc(doc(db, "users", currentUser.uid), {
+                        organizationId: enteredId
+                      }, { merge: true });
+
+                      setUserOrgId(enteredId);
+                      setUserOrgName(orgData.name || "Workspace");
+                    } catch (e: any) {
+                      console.error("Failed to join workspace:", e);
+                      alert("Error: " + e.message);
+                    } finally {
+                      setIsCheckingOrg(false);
+                    }
+                  }}
+                  className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-white font-semibold rounded-xl text-xs border border-zinc-700 hover:border-zinc-650 transition-all cursor-pointer"
+                >
+                  Join Workspace
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-zinc-800 flex justify-between items-center text-[11px] text-zinc-500">
+            <div>Signed in as <span className="font-semibold text-zinc-400">{currentUser.email}</span></div>
+            <button
+              onClick={() => signOut(auth!)}
+              className="text-rose-450 hover:text-rose-450 hover:underline cursor-pointer"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const activeInvoice = invoices.find((inv) => inv.id === activeInvoiceId) || invoices[0];
 
   return (
@@ -388,6 +609,8 @@ export default function Home() {
         userName={currentUser.displayName || undefined}
         userPhoto={currentUser.photoURL || undefined}
         onLogout={auth ? () => signOut(auth!) : undefined}
+        orgName={userOrgName}
+        orgId={userOrgId}
       />
 
       {/* Editor / Invoice Canvas */}

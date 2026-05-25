@@ -79,6 +79,8 @@ interface SidebarProps {
   userName?: string;
   userPhoto?: string;
   onLogout?: () => void;
+  orgName?: string;
+  orgId?: string;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -97,6 +99,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   userName,
   userPhoto,
   onLogout,
+  orgName,
+  orgId,
 }) => {
   const [activeTab, setActiveTab] = useState<"invoices" | "clients" | "emails" | "settings">("invoices");
   const [searchQuery, setSearchQuery] = useState("");
@@ -202,6 +206,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <Plus className="w-4 h-4" />
         </button>
       </div>
+
+      {orgName && (
+        <div className="px-4 py-2 border-b border-zinc-850 bg-zinc-950/20 flex items-center justify-between text-[10px] text-zinc-400 font-sans">
+          <div className="truncate flex-1">
+            <span className="text-zinc-500 mr-1">Workspace:</span>
+            <span className="font-semibold text-zinc-300">{orgName}</span>
+          </div>
+          {orgId && (
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(orgId);
+                alert("Workspace Code copied! Share this code with colleagues to collaborate: " + orgId);
+              }}
+              className="text-[9px] px-1.5 py-0.5 rounded border border-zinc-800 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-400 hover:text-white transition-all cursor-pointer font-mono shrink-0 flex items-center gap-1"
+              title="Copy Workspace Code"
+            >
+              <span>Code: {orgId.slice(0, 8)}...</span>
+              <Copy className="w-2.5 h-2.5" />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex border-b border-zinc-800 text-[10px] font-bold tracking-tight font-sans">

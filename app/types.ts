@@ -21,6 +21,7 @@ export interface ClientPreset {
   email: string;
   mobile: string;
   gstin: string;
+  organizationId?: string; // Isolated by organization
 }
 
 export interface BankDetails {
@@ -62,4 +63,7 @@ export interface Invoice {
   
   createdAt: string;
   updatedAt: string;
+  
+  organizationId?: string; // Isolated by organization
+  sharedWith?: string[]; // Array of user emails explicitly shared with this invoice
 }

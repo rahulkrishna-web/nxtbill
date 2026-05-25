@@ -3,7 +3,7 @@
 import React, { useRef, useState } from "react";
 import { Invoice, InvoiceItem, PaymentTermColumn } from "../types";
 import { AutoResizeTextarea } from "./AutoResizeTextarea";
-import { Plus, Trash2, ArrowUp, ArrowDown, Printer, Download, Save, RefreshCw } from "lucide-react";
+import { Plus, Trash2, ArrowUp, ArrowDown, Printer, Download, Save, RefreshCw, Users, UserPlus, X } from "lucide-react";
 
 interface InvoiceEditorProps {
   invoice: Invoice;
@@ -20,6 +20,39 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({
 }) => {
   const [downloading, setDownloading] = useState(false);
   const invoiceRef = useRef<HTMLDivElement>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareEmail, setShareEmail] = useState("");
+
+  const handleAddShare = () => {
+    const email = shareEmail.trim().toLowerCase();
+    if (!email) return;
+    
+    // basic email validation
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      alert("Please enter a valid email address.");
+      return;
+    }
+
+    const currentShares = invoice.sharedWith || [];
+    if (currentShares.includes(email)) {
+      alert("This invoice is already shared with " + email);
+      return;
+    }
+
+    onChangeInvoice({
+      ...invoice,
+      sharedWith: [...currentShares, email]
+    });
+    setShareEmail("");
+  };
+
+  const handleRemoveShare = (emailToRemove: string) => {
+    const currentShares = invoice.sharedWith || [];
+    onChangeInvoice({
+      ...invoice,
+      sharedWith: currentShares.filter(email => email !== emailToRemove)
+    });
+  };
 
   const handleCompanyChange = (field: keyof Invoice["companyDetails"], value: string) => {
     onChangeInvoice({
@@ -276,6 +309,14 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({
           >
             <Printer className="w-4 h-4" />
             Print Invoice
+          </button>
+
+          <button
+            onClick={() => setShowShareModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-white border border-zinc-700 rounded-lg text-xs font-semibold shadow transition-all cursor-pointer"
+          >
+            <Users className="w-4 h-4 text-teal-400" />
+            Share
           </button>
         </div>
       </div>
@@ -790,6 +831,99 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Share Modal Overlay */}
+      {showShareModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm no-print animate-in fade-in duration-200">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md p-6 shadow-2xl text-zinc-100 flex flex-col gap-4 animate-in slide-in-from-bottom-4 duration-300">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+              <div className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-teal-400" />
+                <h3 className="font-bold text-lg text-white">Share Invoice</h3>
+              </div>
+              <button 
+                onClick={() => setShowShareModal(false)}
+                className="p-1 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-all cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Invite Form */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider font-mono">Add people by email</label>
+              <div className="flex gap-2">
+                <input
+                  type="email"
+                  placeholder="Enter email address (e.g. user@nxtnet.com)"
+                  value={shareEmail}
+                  onChange={(e) => setShareEmail(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleAddShare();
+                  }}
+                  className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-550 focus:outline-none focus:border-teal-500 font-sans"
+                />
+                <button
+                  onClick={handleAddShare}
+                  className="px-4 py-2 bg-teal-500 hover:bg-teal-400 text-black font-semibold rounded-xl text-xs transition-all flex items-center gap-1 cursor-pointer shrink-0"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  Share
+                </button>
+              </div>
+            </div>
+
+            {/* People with Access */}
+            <div className="flex flex-col gap-2">
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider font-mono">People with Access</label>
+              
+              <div className="max-h-48 overflow-y-auto no-scrollbar border border-zinc-800 bg-zinc-950/40 rounded-xl divide-y divide-zinc-850/30">
+                {/* Workspace Level */}
+                <div className="p-3 flex items-center justify-between text-xs">
+                  <div>
+                    <div className="font-semibold text-zinc-300">Workspace Members</div>
+                    <div className="text-[10px] text-zinc-500">Anyone in this workspace has edit access</div>
+                  </div>
+                  <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700 font-medium">Workspace</span>
+                </div>
+
+                {/* Explicitly Shared Emails */}
+                {(invoice.sharedWith && invoice.sharedWith.length > 0) ? (
+                  invoice.sharedWith.map((email) => (
+                    <div key={email} className="p-3 flex items-center justify-between text-xs">
+                      <div className="truncate pr-4">
+                        <div className="font-medium text-zinc-300 truncate">{email}</div>
+                        <div className="text-[9px] text-zinc-500">Shared via direct email</div>
+                      </div>
+                      <button
+                        onClick={() => handleRemoveShare(email)}
+                        className="text-[10px] text-rose-400 hover:text-rose-350 hover:underline transition-all cursor-pointer font-medium"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-3 text-center text-zinc-600 text-xs italic">
+                    Not shared with any direct emails yet
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="pt-2 border-t border-zinc-800 flex justify-end">
+              <button
+                onClick={() => setShowShareModal(false)}
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white font-semibold rounded-xl text-xs transition-all cursor-pointer"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
