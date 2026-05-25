@@ -46,6 +46,11 @@ export default function Home() {
   useEffect(() => {
     setIsMounted(true);
     
+    if (!auth) {
+      setAuthLoading(false);
+      return;
+    }
+    
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setAuthLoading(false);
@@ -56,14 +61,14 @@ export default function Home() {
 
   // 2. Firestore real-time sync subscription
   useEffect(() => {
-    if (!currentUser) {
+    if (!currentUser || !db) {
       setInvoices([]);
       setClientPresets([]);
       return;
     }
 
     // Subscribe to invoices collection
-    const invoicesRef = collection(db, "invoices");
+    const invoicesRef = collection(db!, "invoices");
     const unsubscribeInvoices = onSnapshot(invoicesRef, (snapshot) => {
       let loadedInvoices: Invoice[] = [];
       snapshot.forEach((doc) => {
@@ -79,7 +84,7 @@ export default function Home() {
 
       if (loadedInvoices.length === 0) {
         // Seed with INITIAL_INVOICE
-        setDoc(doc(db, "invoices", INITIAL_INVOICE.id), INITIAL_INVOICE);
+        setDoc(doc(db!, "invoices", INITIAL_INVOICE.id), INITIAL_INVOICE);
       } else {
         setInvoices(loadedInvoices);
         // Ensure there is an activeInvoiceId
@@ -95,7 +100,7 @@ export default function Home() {
     });
 
     // Subscribe to client presets collection
-    const clientsRef = collection(db, "clientPresets");
+    const clientsRef = collection(db!, "clientPresets");
     const unsubscribeClients = onSnapshot(clientsRef, (snapshot) => {
       let loadedClients: ClientPreset[] = [];
       snapshot.forEach((doc) => {
@@ -105,7 +110,7 @@ export default function Home() {
       if (loadedClients.length === 0) {
         // Seed DEFAULT_CLIENTS
         DEFAULT_CLIENTS.forEach(client => {
-          setDoc(doc(db, "clientPresets", client.id), client);
+          setDoc(doc(db!, "clientPresets", client.id), client);
         });
       } else {
         setClientPresets(loadedClients);
@@ -125,6 +130,7 @@ export default function Home() {
   };
 
   const handleCreateInvoice = async () => {
+    if (!db) return;
     // Generate new invoice number by finding the highest one and adding 1
     const invoiceNumbers = invoices
       .map((inv) => parseInt(inv.invoiceNumber))
@@ -188,7 +194,7 @@ export default function Home() {
     };
 
     try {
-      await setDoc(doc(db, "invoices", newInvoice.id), newInvoice);
+      await setDoc(doc(db!, "invoices", newInvoice.id), newInvoice);
       setActiveInvoiceId(newInvoice.id);
     } catch (e) {
       console.error("Failed to create invoice in Firestore:", e);
@@ -196,8 +202,9 @@ export default function Home() {
   };
 
   const handleDeleteInvoice = async (id: string) => {
+    if (!db) return;
     try {
-      await deleteDoc(doc(db, "invoices", id));
+      await deleteDoc(doc(db!, "invoices", id));
       if (activeInvoiceId === id) {
         const remaining = invoices.filter((inv) => inv.id !== id);
         if (remaining.length > 0) {
@@ -210,8 +217,9 @@ export default function Home() {
   };
 
   const handleUpdateInvoice = async (updatedInvoice: Invoice) => {
+    if (!db) return;
     try {
-      const docRef = doc(db, "invoices", updatedInvoice.id);
+      const docRef = doc(db!, "invoices", updatedInvoice.id);
       await setDoc(docRef, {
         ...updatedInvoice,
         updatedAt: new Date().toISOString()
@@ -226,6 +234,7 @@ export default function Home() {
   };
 
   const handleResetInvoice = async () => {
+    if (!db) return;
     const activeInvoice = invoices.find((inv) => inv.id === activeInvoiceId);
     if (!activeInvoice) return;
 
@@ -238,7 +247,7 @@ export default function Home() {
         updatedAt: new Date().toISOString() 
       };
       try {
-        await setDoc(doc(db, "invoices", activeInvoiceId), reset);
+        await setDoc(doc(db!, "invoices", activeInvoiceId), reset);
       } catch (e) {
         console.error("Failed to reset invoice in Firestore:", e);
       }
@@ -247,21 +256,23 @@ export default function Home() {
 
   // Client presets
   const handleAddClientPreset = async (newPreset: Omit<ClientPreset, "id">) => {
+    if (!db) return;
     const presetId = `client-${Date.now()}`;
     const preset: ClientPreset = {
       ...newPreset,
       id: presetId,
     };
     try {
-      await setDoc(doc(db, "clientPresets", presetId), preset);
+      await setDoc(doc(db!, "clientPresets", presetId), preset);
     } catch (e) {
       console.error("Failed to add client preset to Firestore:", e);
     }
   };
 
   const handleDeleteClientPreset = async (id: string) => {
+    if (!db) return;
     try {
-      await deleteDoc(doc(db, "clientPresets", id));
+      await deleteDoc(doc(db!, "clientPresets", id));
     } catch (e) {
       console.error("Failed to delete client preset from Firestore:", e);
     }
@@ -296,22 +307,23 @@ export default function Home() {
   };
 
   const handleImportData = (jsonString: string): boolean => {
+    if (!db) return false;
     try {
       const data = JSON.parse(jsonString);
       if (data && Array.isArray(data.invoices)) {
-        const batch = writeBatch(db);
+        const batch = writeBatch(db!);
         data.invoices.forEach((inv: Invoice) => {
           const normalized = {
             ...inv,
             date: inv.date ? normalizeDateStr(inv.date) : inv.date
           };
-          const ref = doc(db, "invoices", normalized.id);
+          const ref = doc(db!, "invoices", normalized.id);
           batch.set(ref, normalized);
         });
 
         if (Array.isArray(data.clientPresets)) {
           data.clientPresets.forEach((client: ClientPreset) => {
-            const ref = doc(db, "clientPresets", client.id);
+            const ref = doc(db!, "clientPresets", client.id);
             batch.set(ref, client);
           });
         }
@@ -369,7 +381,7 @@ export default function Home() {
         userEmail={currentUser.email || undefined}
         userName={currentUser.displayName || undefined}
         userPhoto={currentUser.photoURL || undefined}
-        onLogout={() => signOut(auth)}
+        onLogout={auth ? () => signOut(auth!) : undefined}
       />
 
       {/* Editor / Invoice Canvas */}

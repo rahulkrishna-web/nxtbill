@@ -12,15 +12,22 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
 };
 
-// Initialize Firebase - SSR safe
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+const isConfigValid = !!firebaseConfig.apiKey;
+
+// Initialize Firebase - SSR & build safe
+const app = isConfigValid 
+  ? (getApps().length > 0 ? getApp() : initializeApp(firebaseConfig))
+  : null;
+
+const auth = app ? getAuth(app) : null;
+const db = app ? getFirestore(app) : null;
 const googleProvider = new GoogleAuthProvider();
 
-// Force prompt selection for Google account (optional, but helpful for multiple business accounts)
-googleProvider.setCustomParameters({
-  prompt: 'select_account'
-});
+if (googleProvider && isConfigValid) {
+  // Force prompt selection for Google account
+  googleProvider.setCustomParameters({
+    prompt: 'select_account'
+  });
+}
 
 export { app, auth, db, googleProvider };

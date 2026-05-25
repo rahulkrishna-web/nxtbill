@@ -13,6 +13,9 @@ export function Login() {
     setLoading(true);
     setError(null);
     try {
+      if (!auth) {
+        throw new Error("Firebase Auth is not initialized. Please ensure that you have added the required Firebase environment variables to Vercel and deployed again.");
+      }
       await signInWithPopup(auth, googleProvider);
     } catch (err: any) {
       console.error("Firebase Login Error:", err);
