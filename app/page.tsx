@@ -6,6 +6,7 @@ import { INITIAL_INVOICE, DEFAULT_CLIENTS, DEFAULT_COMPANY, DEFAULT_BANK } from 
 import { Sidebar } from "./components/Sidebar";
 import { InvoiceEditor } from "./components/InvoiceEditor";
 import { Login } from "./components/Login";
+import { ShieldAlert } from "lucide-react";
 
 // Firebase imports
 import { collection, doc, onSnapshot, setDoc, deleteDoc, writeBatch } from "firebase/firestore";
@@ -41,6 +42,7 @@ export default function Home() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [activeInvoiceId, setActiveInvoiceId] = useState<string>("");
   const [clientPresets, setClientPresets] = useState<ClientPreset[]>([]);
+  const [dbError, setDbError] = useState<string | null>(null);
 
   // 1. Mount & Auth subscription
   useEffect(() => {
@@ -70,6 +72,7 @@ export default function Home() {
     // Subscribe to invoices collection
     const invoicesRef = collection(db!, "invoices");
     const unsubscribeInvoices = onSnapshot(invoicesRef, (snapshot) => {
+      setDbError(null);
       let loadedInvoices: Invoice[] = [];
       snapshot.forEach((doc) => {
         loadedInvoices.push(doc.data() as Invoice);
@@ -97,11 +100,13 @@ export default function Home() {
       }
     }, (err) => {
       console.error("Firestore read error (invoices):", err);
+      setDbError(err.message || "Failed to load invoices.");
     });
 
     // Subscribe to client presets collection
     const clientsRef = collection(db!, "clientPresets");
     const unsubscribeClients = onSnapshot(clientsRef, (snapshot) => {
+      setDbError(null);
       let loadedClients: ClientPreset[] = [];
       snapshot.forEach((doc) => {
         loadedClients.push(doc.data() as ClientPreset);
@@ -117,6 +122,7 @@ export default function Home() {
       }
     }, (err) => {
       console.error("Firestore read error (clients):", err);
+      setDbError(err.message || "Failed to load client presets.");
     });
 
     return () => {
@@ -385,7 +391,41 @@ export default function Home() {
       />
 
       {/* Editor / Invoice Canvas */}
-      {activeInvoice ? (
+      {dbError ? (
+        <div className="flex-1 flex items-center justify-center bg-zinc-100 dark:bg-zinc-950 p-6">
+          <div className="max-w-md w-full bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/80 rounded-2xl p-6 shadow-2xl text-zinc-100">
+            <div className="flex items-center gap-3 text-amber-500 mb-4">
+              <ShieldAlert className="w-6 h-6" />
+              <h3 className="font-bold text-lg">Database Setup Required</h3>
+            </div>
+            <p className="text-sm text-zinc-400 mb-4 leading-relaxed">
+              {dbError.includes("permission") || dbError.includes("Permission") 
+                ? "Your Firebase account does not have read/write access to Cloud Firestore. You need to configure the database rules in the Firebase console." 
+                : dbError}
+            </p>
+            <div className="text-xs bg-zinc-950/60 p-4 rounded-xl border border-zinc-800/50 space-y-2 text-zinc-400">
+              <p className="font-semibold text-zinc-200">How to Fix This:</p>
+              <ul className="list-disc pl-4 space-y-1.5">
+                <li>Go to the <a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer" className="text-teal-400 hover:underline">Firebase Console</a>.</li>
+                <li>Ensure you have clicked <strong>Create Database</strong> under <strong>Cloud Firestore</strong>.</li>
+                <li>Go to the <strong>Rules</strong> tab and replace the default rules with:
+                  <pre className="mt-1 bg-zinc-900 p-2 rounded border border-zinc-800 text-[10px] text-teal-300/90 overflow-x-auto">
+{`rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}`}
+                  </pre>
+                </li>
+                <li>Publish the new rules and refresh this page.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      ) : activeInvoice ? (
         <InvoiceEditor
           invoice={activeInvoice}
           onChangeInvoice={handleUpdateInvoice}
